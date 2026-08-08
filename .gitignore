@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.local
+
+# Real work data — not meant to sit in git history (it's now in Firestore).
+work_log.json
+
+# Local Claude Code tooling config, not part of the app.
+.claude/
