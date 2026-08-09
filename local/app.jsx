@@ -39,6 +39,7 @@ import {
   Upload,
   Download,
   LogOut,
+  Menu,
 } from "lucide-react";
 
 // Inlined rather than imported from ./firebaseConfig.js: babel-standalone
@@ -1031,6 +1032,12 @@ function WorkLogConsole({ user }) {
   const [dueSoonWindow, setDueSoonWindow] = useState(7);
   const [showAddProject, setShowAddProject] = useState(false);
   const [showAddTopic, setShowAddTopic] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const selectView = useCallback((id) => {
+    setSelected(id);
+    setMobileNavOpen(false);
+  }, []);
 
   const addProject = useCallback(
     async (data) => {
@@ -1121,10 +1128,23 @@ function WorkLogConsole({ user }) {
         isDragging ? "select-none cursor-col-resize" : ""
       }`}
     >
+      {/* ── Mobile drawer backdrop ── */}
+      {!isDesktop && mobileNavOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+
       {/* ── Sidebar ── */}
+      {/* On mobile this is an off-canvas drawer (fixed + translate), toggled by
+          the header's menu button, so the main content is visible immediately
+          instead of requiring a long scroll past the whole nav list. */}
       <aside
         style={isDesktop ? { width: sidebarWidth } : undefined}
-        className="w-full md:w-[280px] shrink-0 border-b md:border-b-0 md:border-r border-[#242832] bg-[#12141A] flex flex-col"
+        className={`fixed inset-y-0 left-0 z-40 w-[85%] max-w-[320px] transform transition-transform duration-200 ease-in-out ${
+          mobileNavOpen ? "translate-x-0" : "-translate-x-full"
+        } md:static md:z-auto md:w-[280px] md:translate-x-0 md:transition-none md:max-w-none shrink-0 border-b md:border-b-0 md:border-r border-[#242832] bg-[#12141A] flex flex-col overflow-hidden`}
       >
         <div className="px-5 pt-5 pb-4 border-b border-[#242832] relative overflow-hidden">
           <div
@@ -1149,7 +1169,7 @@ function WorkLogConsole({ user }) {
             Views
           </div>
           <button
-            onClick={() => setSelected("duesoon")}
+            onClick={() => selectView("duesoon")}
             className={`w-full text-left rounded-md px-3 py-3 mb-5 transition-colors border ${
               isDueSoonMode
                 ? "bg-[#1E222B] border-[#3A3F4C]"
@@ -1190,7 +1210,7 @@ function WorkLogConsole({ user }) {
                 project={p}
                 active={selected === p.project_id}
                 count={topicCounts[p.project_id]}
-                onClick={() => setSelected(p.project_id)}
+                onClick={() => selectView(p.project_id)}
                 onSetDueDate={updateProjectDueDate}
               />
             ))}
@@ -1201,7 +1221,7 @@ function WorkLogConsole({ user }) {
             Unassigned
           </div>
           <button
-            onClick={() => setSelected("standalone")}
+            onClick={() => selectView("standalone")}
             className={`w-full text-left rounded-md px-3 py-3 transition-colors border ${
               selected === "standalone"
                 ? "bg-[#1E222B] border-[#3A3F4C]"
@@ -1240,6 +1260,14 @@ function WorkLogConsole({ user }) {
       {/* ── Main content ── */}
       <main className="flex-1 flex flex-col min-w-0">
         <div className="px-6 pt-6 pb-4 border-b border-[#242832]">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="md:hidden mb-4 inline-flex items-center gap-1.5 rounded-md border border-[#242832] bg-[#171A21] px-2.5 py-1.5 text-[11px] font-mono uppercase tracking-wide text-[#8A90A0] hover:text-[#E7E9EE] transition-colors"
+          >
+            <Menu size={14} />
+            專案 / 檢視
+          </button>
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="min-w-0">
               {isDueSoonMode ? (
