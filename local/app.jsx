@@ -15,6 +15,7 @@ import {
   onSnapshot,
   addDoc,
   updateDoc,
+  deleteDoc,
   writeBatch,
 } from "firebase/firestore";
 import {
@@ -381,6 +382,20 @@ function useFirestoreStore(uid) {
     [topicsCol]
   );
 
+  const updateTopic = useCallback(
+    (topicId, data) => {
+      updateDoc(doc(topicsCol, topicId), data).catch((e) => setStatus(`更新失敗：${e.message}`));
+    },
+    [topicsCol]
+  );
+
+  const deleteTopic = useCallback(
+    (topicId) => {
+      deleteDoc(doc(topicsCol, topicId)).catch((e) => setStatus(`刪除失敗：${e.message}`));
+    },
+    [topicsCol]
+  );
+
   const importBulk = useCallback(
     async (data) => {
       const normalized = normalizeLoaded(data);
@@ -431,6 +446,8 @@ function useFirestoreStore(uid) {
     updateProjectDueDate,
     addProject,
     addTopic,
+    updateTopic,
+    deleteTopic,
     importBulk,
     exportFile,
     loadSample,
@@ -547,10 +564,19 @@ function MetaBit({ icon: Icon, children }) {
 }
 
 // ── Topic card (list view) ──────────────────────────────────────────────
-function TopicRow({ topic, onStatusChange, onDueDateChange, projectLabel, dueSoonMode }) {
+function TopicRow({ topic, onStatusChange, onDueDateChange, onEdit, projectLabel, dueSoonMode }) {
   const days = dueSoonMode ? daysUntil(topic.due_date) : null;
   return (
-    <div className="group flex items-center justify-between gap-4 rounded-md border border-[#242832] bg-[#171A21] px-4 py-3.5 transition-colors hover:border-[#3A3F4C] hover:bg-[#1B1F28]">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onEdit(topic)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onEdit(topic);
+      }}
+      title="點擊編輯任務"
+      className="group flex items-center justify-between gap-4 rounded-md border border-[#242832] bg-[#171A21] px-4 py-3.5 transition-colors hover:border-[#3A3F4C] hover:bg-[#1B1F28] cursor-pointer"
+    >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
           <StatusSelect status={topic.status} onChange={(st) => onStatusChange(topic.topic_id, st)} />
@@ -584,10 +610,19 @@ function TopicRow({ topic, onStatusChange, onDueDateChange, projectLabel, dueSoo
 }
 
 // ── Topic card (kanban view) ────────────────────────────────────────────
-function TopicCard({ topic, onStatusChange, onDueDateChange, projectLabel, dueSoonMode }) {
+function TopicCard({ topic, onStatusChange, onDueDateChange, onEdit, projectLabel, dueSoonMode }) {
   const days = dueSoonMode ? daysUntil(topic.due_date) : null;
   return (
-    <div className="rounded-md border border-[#242832] bg-[#171A21] p-3.5 hover:border-[#3A3F4C] transition-colors">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onEdit(topic)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onEdit(topic);
+      }}
+      title="點擊編輯任務"
+      className="rounded-md border border-[#242832] bg-[#171A21] p-3.5 hover:border-[#3A3F4C] transition-colors cursor-pointer"
+    >
       <div className="flex items-center justify-between mb-2">
         <StatusSelect status={topic.status} onChange={(st) => onStatusChange(topic.topic_id, st)} compact />
         <TypeChip type={topic.type} />
@@ -918,6 +953,129 @@ function AddTopicForm({ projects, defaultProjectId, onSubmit, onClose }) {
   );
 }
 
+// ── Edit Topic form ──────────────────────────────────────────────────────
+// Same fields as AddTopicForm, pre-filled — this is also how a topic gets
+// re-filed under a different project (or made standalone) after the fact,
+// which the inline status/due-date editors on the card can't do.
+function EditTopicForm({ topic, projects, onSubmit, onDelete, onClose }) {
+  const [title, setTitle] = useState(topic.title);
+  const [projectId, setProjectId] = useState(topic.project_id || "");
+  const [status, setStatus] = useState(topic.status);
+  const [customer, setCustomer] = useState(topic.customer || "");
+  const [department, setDepartment] = useState(topic.department || "");
+  const [type, setType] = useState(topic.type);
+  const [dueDate, setDueDate] = useState(topic.due_date || "");
+  const [error, setError] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      setError("請輸入任務名稱");
+      return;
+    }
+    onSubmit({
+      title: title.trim(),
+      project_id: projectId || null,
+      status,
+      customer: customer.trim() || null,
+      department: department.trim() || null,
+      type,
+      due_date: normalizeDate(dueDate.trim()) || null,
+    });
+    onClose();
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <Field label="任務名稱 *">
+        <input
+          autoFocus
+          value={title}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            if (error) setError("");
+          }}
+          className={inputClass}
+        />
+        {error && <p className="mt-1 text-[11px] text-[#F0898C]">{error}</p>}
+      </Field>
+      <Field label="所屬專案">
+        <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className={inputClass}>
+          <option value="">獨立任務（無所屬專案）</option>
+          {projects.map((p) => (
+            <option key={p.project_id} value={p.project_id}>
+              {p.title}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="狀態">
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
+            {KANBAN_COLUMNS.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="類型">
+          <select value={type} onChange={(e) => setType(e.target.value)} className={inputClass}>
+            {Object.keys(TOPIC_TYPE_STYLE).map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="客戶（選填）">
+          <input value={customer} onChange={(e) => setCustomer(e.target.value)} className={inputClass} />
+        </Field>
+        <Field label="部門（選填）">
+          <input value={department} onChange={(e) => setDepartment(e.target.value)} className={inputClass} />
+        </Field>
+      </div>
+      <Field label="到期日（選填，建議 YYYY-MM-DD）">
+        <input value={dueDate} onChange={(e) => setDueDate(e.target.value)} placeholder="2026-08-25" className={inputClass} />
+      </Field>
+      <div className="flex items-center justify-between gap-2 pt-1">
+        <button
+          type="button"
+          onClick={() => {
+            if (confirmingDelete) {
+              onDelete();
+              onClose();
+            } else {
+              setConfirmingDelete(true);
+            }
+          }}
+          className={`px-2.5 py-1.5 text-[12px] rounded-md transition-colors ${
+            confirmingDelete
+              ? "bg-[#4A2A2C] text-[#F0898C] hover:bg-[#5A3234]"
+              : "text-[#8A6A6D] hover:text-[#F0898C]"
+          }`}
+        >
+          {confirmingDelete ? "確定刪除？再按一次" : "刪除任務"}
+        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onClose} className="px-3 py-1.5 text-[12px] text-[#8A90A0] hover:text-[#B3B8C4] transition-colors">
+            取消
+          </button>
+          <button
+            type="submit"
+            className="inline-flex items-center gap-1.5 rounded-md bg-[#F5A623] text-[#171208] px-3.5 py-1.5 text-[12px] font-semibold hover:bg-[#F7B84D] transition-colors"
+          >
+            儲存變更
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
 // ── Sidebar project item ────────────────────────────────────────────────
 function ProjectItem({ project, active, onClick, count, onSetDueDate }) {
   const s = PROJECT_STATUS_STYLE[project.status];
@@ -1025,13 +1183,23 @@ const SIDEBAR_DEFAULT = 280;
 
 function WorkLogConsole({ user }) {
   const store = useFirestoreStore(user.uid);
-  const { projects, topics, updateTopicStatus, updateTopicDueDate, updateProjectDueDate, addTopic } = store;
+  const {
+    projects,
+    topics,
+    updateTopicStatus,
+    updateTopicDueDate,
+    updateProjectDueDate,
+    addTopic,
+    updateTopic,
+    deleteTopic,
+  } = store;
 
   const [selected, setSelected] = useState("standalone");
   const [viewMode, setViewMode] = useState("list"); // 'list' | 'kanban'
   const [dueSoonWindow, setDueSoonWindow] = useState(7);
   const [showAddProject, setShowAddProject] = useState(false);
   const [showAddTopic, setShowAddTopic] = useState(false);
+  const [editingTopic, setEditingTopic] = useState(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const selectView = useCallback((id) => {
@@ -1374,6 +1542,7 @@ function WorkLogConsole({ user }) {
                   topic={t}
                   onStatusChange={updateTopicStatus}
                   onDueDateChange={updateTopicDueDate}
+                  onEdit={setEditingTopic}
                   projectLabel={isDueSoonMode ? projectsById[t.project_id] || "獨立任務" : null}
                   dueSoonMode={isDueSoonMode}
                 />
@@ -1403,6 +1572,7 @@ function WorkLogConsole({ user }) {
                             topic={t}
                             onStatusChange={updateTopicStatus}
                             onDueDateChange={updateTopicDueDate}
+                            onEdit={setEditingTopic}
                             projectLabel={isDueSoonMode ? projectsById[t.project_id] || "獨立任務" : null}
                             dueSoonMode={isDueSoonMode}
                           />
@@ -1430,6 +1600,18 @@ function WorkLogConsole({ user }) {
             defaultProjectId={isDueSoonMode || selected === "standalone" ? "" : selected}
             onSubmit={addTopic}
             onClose={() => setShowAddTopic(false)}
+          />
+        </Modal>
+      )}
+
+      {editingTopic && (
+        <Modal title="編輯任務" onClose={() => setEditingTopic(null)}>
+          <EditTopicForm
+            topic={editingTopic}
+            projects={projects}
+            onSubmit={(data) => updateTopic(editingTopic.topic_id, data)}
+            onDelete={() => deleteTopic(editingTopic.topic_id)}
+            onClose={() => setEditingTopic(null)}
           />
         </Modal>
       )}
